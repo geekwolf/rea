@@ -1,4 +1,5 @@
 import { posix } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { parseExpression } from "@babel/parser";
 import { describe, expect, it } from "vitest";
@@ -63,7 +64,36 @@ const unknownExpressions = [
   'resolve("/app", "preload.js")',
   '__dirname + "preload.js"',
   'path.dirname(__filename) + "preload.js"',
+  'fileURLToPath("https://example.test/preload.js")',
+  'fileURLToPath("file:///app/invalid%.js")',
+  'fileURLToPath("file:///app/preload%2fname.js")',
+  'fileURLToPath("file://remote-host/app/preload.js")',
+  'fileURLToPath("/app/preload.js")',
+  "fileURLToPath(runtimePath)",
 ];
+
+describe("file URL path conversion", () => {
+  it("preserves source-relative file URL conversion", () => {
+    assertPathProjection(
+      'fileURLToPath(new URL("./preload.js", import.meta.url))',
+      "./preload.js",
+      "filesystem-expression",
+    );
+  });
+
+  it.each([
+    "file:///app/preload%20file.js",
+    "file:///app/preload.js",
+    "file:///app/pr%C3%A9load.js",
+    "file:///app/preload%3F%23.js?cache=1#fragment",
+  ])("decodes literal file URL %s as a filesystem expression", (url) => {
+    assertPathProjection(
+      `fileURLToPath(${JSON.stringify(url)})`,
+      fileURLToPath(url, { windows: false }),
+      "filesystem-expression",
+    );
+  });
+});
 
 describe("inert JavaScript path resolution", () => {
   it.each(absoluteParts)(

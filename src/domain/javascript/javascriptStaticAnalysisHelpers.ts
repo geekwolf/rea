@@ -249,9 +249,17 @@ const staticFileUrlPath = (
   argument: t.Node | undefined,
 ): string | undefined => {
   if (argument === undefined) return undefined;
-  return isSourceFileUrl(argument)
-    ? sourceRelativeFileUrlPath(argument)
-    : staticPath(argument);
+  if (isSourceFileUrl(argument)) return sourceRelativeFileUrlPath(argument);
+  const literal = staticPath(argument);
+  if (literal === undefined) return undefined;
+  try {
+    // Use the same host-independent path model as source-relative conversion.
+    return fileURLToPath(literal, { windows: false });
+  } catch (cause: unknown) {
+    // Non-file URLs and invalid encoded paths cannot establish a filesystem path.
+    void cause;
+    return undefined;
+  }
 };
 
 /** Project a known source-relative URL through the actual file URL decoder. */
@@ -339,10 +347,7 @@ const isFilesystemPathExpression = (node: t.Node): boolean => {
     if (name === "URL" || name.endsWith(".URL"))
       return isFileIdentity(argumentNode(node.arguments[1]));
     if (name === "fileURLToPath" || name.endsWith(".fileURLToPath"))
-      return node.arguments.some((argument) => {
-        const value = argumentNode(argument);
-        return value !== undefined && isFilesystemPathExpression(value);
-      });
+      return true;
     return node.arguments.some((argument) => {
       const value = argumentNode(argument);
       return value !== undefined && isFilesystemPathExpression(value);
