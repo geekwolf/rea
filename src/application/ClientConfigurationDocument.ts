@@ -14,6 +14,7 @@ import {
 } from "./HermesConfigurationYaml.js";
 import {
   applyEdits,
+  createScanner,
   findNodeAtLocation,
   modify,
   parse as parseJsonc,
@@ -1281,8 +1282,9 @@ const commentsBetweenProperties = (gap: string): string | undefined => {
 
 /**
  * Delete an object property without taking a comment from the gap before it.
- * jsonc-parser's removal span includes that gap, so a trailing comment on the
- * previous property would disappear. Returns `undefined` to keep the stock edit.
+ * Stock removal includes adjacent trivia and can leave a lone trailing comma.
+ * Keep that trivia and locate separators using the JSONC scanner.
+ * Returns `undefined` to keep the stock edit when no special handling is needed.
  */
 const deleteJsonPropertyPreservingComments = (
   text: string,
@@ -1301,6 +1303,22 @@ const deleteJsonPropertyPreservingComments = (
   )
     return undefined;
   const propertyIndex = parent.children.indexOf(property);
+  const scanner = createScanner(text, true);
+  scanner.setPosition(property.offset + property.length);
+  scanner.scan();
+  const comma =
+    text[scanner.getTokenOffset()] === ","
+      ? {
+          offset: scanner.getTokenOffset(),
+          length: scanner.getTokenLength(),
+          content: "",
+        }
+      : undefined;
+  if (propertyIndex === 0)
+    return applyEdits(text, [
+      { offset: property.offset, length: property.length, content: "" },
+      ...(comma === undefined ? [] : [comma]),
+    ]);
   const previous = parent.children[propertyIndex - 1];
   if (propertyIndex <= 0 || previous === undefined) return undefined;
   const comments = commentsBetweenProperties(
@@ -1310,32 +1328,8 @@ const deleteJsonPropertyPreservingComments = (
   let removeEnd = property.offset + property.length;
   const hasNext = parent.children[propertyIndex + 1] !== undefined;
   if (hasNext) {
-    let comma = removeEnd;
-    while (comma < text.length) {
-      const char = text[comma];
-      if (char === " " || char === "\t" || char === "\r" || char === "\n") {
-        comma += 1;
-        continue;
-      }
-      if (text.startsWith("/*", comma)) {
-        const close = text.indexOf("*/", comma + 2);
-        if (close < 0) return undefined;
-        comma = close + 2;
-        continue;
-      }
-      if (text.startsWith("//", comma)) {
-        while (
-          comma < text.length &&
-          text[comma] !== "\n" &&
-          text[comma] !== "\r"
-        )
-          comma += 1;
-        continue;
-      }
-      break;
-    }
-    if (text[comma] !== ",") return undefined;
-    removeEnd = comma + 1;
+    if (comma === undefined) return undefined;
+    removeEnd = comma.offset + comma.length;
   }
   // A line comment runs to the next break. Keep the following token outside it.
   const remainder = text.slice(removeEnd);
